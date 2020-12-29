@@ -47,7 +47,7 @@ func loadProgram() []command {
 	return commands
 }
 
-func main() {
+func roundOne() {
 	commands := loadProgram()
 	memory := make(map[int]int)
 	mask := ""
@@ -68,6 +68,72 @@ func main() {
 				}
 			}
 			memory[command.index] = value
+		}
+	}
+	sum := 0
+	for _, contents := range memory {
+		sum += contents
+	}
+	fmt.Println("sum of memory is", sum)
+}
+
+// Round 2
+type Mask struct {
+	root     int
+	floating []int // a list of all indexes that are floating, where 0 is rightmost
+}
+
+func setBit(num int, bitI int, bit int) int {
+	if bit == 0 {
+		// Clear this bit
+		num &= ^(1 << bitI)
+	} else {
+		num |= (1 << bitI)
+	}
+	return num
+}
+
+func main() {
+	commands := loadProgram()
+	memory := make(map[int]int)
+	mask := Mask{0, make([]int, 0)}
+	for _, command := range commands {
+		if len(command.mask) > 0 {
+			// Parse the mask into a Mask struct with root and floating
+			floating := make([]int, 0)
+			root := 0
+			for i, maskRune := range command.mask {
+				bitI := 35 - i
+				if maskRune == 'X' {
+					floating = append(floating, bitI)
+				} else {
+					maskBit, _ := strconv.Atoi(string(maskRune))
+					if maskBit == 1 {
+						// Set this bit to 1, all other bits are 0 by default
+						root |= (1 << bitI)
+					}
+				}
+			}
+			mask = Mask{root, floating}
+		} else {
+			indexes := make([]int, 0)
+			// overwrite all 1s in the mask in the index
+			indexes = append(indexes, command.index|mask.root)
+			for i := 0; i < len(mask.floating); i++ {
+				// Expand all current saved indexes by flipping the bit to 1 and to 0
+				newIndexes := make([]int, 0)
+				for _, num := range indexes {
+					// One of these is already in the list and one isn't, but just
+					// make a new list to avoid modifying indexes while iterating
+					newIndexes = append(newIndexes, setBit(num, mask.floating[i], 0))
+					newIndexes = append(newIndexes, setBit(num, mask.floating[i], 1))
+				}
+				indexes = newIndexes
+			}
+			// write the value to all masked indices
+			for _, index := range indexes {
+				memory[index] = command.value
+			}
 		}
 	}
 	sum := 0
