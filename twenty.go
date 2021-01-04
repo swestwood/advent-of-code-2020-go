@@ -22,10 +22,9 @@ const (
 )
 
 type solution struct {
-	tileGrid      map[coord]tilePermutation
-	usedTiles     map[int]bool // key is the tile id, value is if it is used
-	cornerProduct int
-	dim           int
+	tileGrid  map[coord]tilePermutation
+	usedTiles map[int]bool // key is the tile id, value is if it is used
+	dim       int          // the dim of tile grid
 }
 
 type tile struct {
@@ -64,6 +63,17 @@ func (t tile) String() string {
 		str += "\n"
 	}
 	return str
+}
+
+// To avoid recomputing all the permutations over and over
+var cachedPermuted = make(map[tilePermutation]*map[coord]string, 0)
+
+func (t *tile) applyCached(p permutation) map[coord]string {
+	val, exists := cachedPermuted[tilePermutation{t.id, p}]
+	if !exists {
+		panic("doesn't exist" + string(t.id))
+	}
+	return *val
 }
 
 func (t *tile) apply(p permutation) map[coord]string {
@@ -117,6 +127,24 @@ func initPermutations() []permutation {
 	return allPermutes
 }
 
+func print(grid map[coord]string, dim int, asImage bool) {
+	if asImage {
+		for r := 1; r < dim-1; r++ {
+			for c := 1; c < dim-1; c++ {
+				fmt.Print(grid[coord{r, c}])
+			}
+			fmt.Println()
+		}
+	} else {
+		for r := 0; r < dim; r++ {
+			for c := 0; c < dim; c++ {
+				fmt.Print(grid[coord{r, c}])
+			}
+			fmt.Println()
+		}
+	}
+}
+
 func load() map[int]*tile {
 	file, err := os.Open("./twenty-input.txt")
 	if err != nil {
@@ -129,7 +157,6 @@ func load() map[int]*tile {
 	tiles := make(map[int]*tile, 0)
 	row := 0
 	for scanner.Scan() {
-		// Example:
 		line := scanner.Text()
 		if err != nil {
 			log.Fatal(err)
@@ -158,7 +185,7 @@ func (c coord) next(dim int) coord {
 	if c.col+1 < dim {
 		return coord{c.row, c.col + 1}
 	}
-	// wrap to next row, even if it might be out of bounds
+	// wrap to next row, even if it might be out of bounds row-wise
 	return coord{c.row + 1, 0}
 }
 
@@ -191,7 +218,7 @@ func (sol *solution) getVal(outer coord, inner coord, tiles map[int]*tile) strin
 func (sol *solution) getTileGrid(outer coord, tiles map[int]*tile) map[coord]string {
 	tp := sol.tileGrid[outer]
 	t := tiles[tp.tileID]
-	return t.apply(tp.p)
+	return t.applyCached(tp.p)
 }
 
 func arrange(sol *solution, solLoc coord, tiles map[int]*tile, cache map[corner][]tilePermutation,
@@ -199,7 +226,6 @@ func arrange(sol *solution, solLoc coord, tiles map[int]*tile, cache map[corner]
 	if solLoc.row >= sol.dim {
 		return sol, true
 	}
-	// Explore all possible paths that fit into row and col
 	options := make([]tilePermutation, 0)
 
 	if solLoc.row == 0 && solLoc.col == 0 {
@@ -212,6 +238,7 @@ func arrange(sol *solution, solLoc coord, tiles map[int]*tile, cache map[corner]
 		if solLoc.row > 0 {
 			top = bottoms[sol.tileGrid[coord{solLoc.row - 1, solLoc.col}]]
 		}
+		// all tile permutations matching this top left
 		options, _ = cache[corner{top, left}]
 	}
 	// fmt.Println("exploring", len(options), "options at", solLoc, options)
@@ -234,14 +261,6 @@ func arrange(sol *solution, solLoc coord, tiles map[int]*tile, cache map[corner]
 	return sol, false
 }
 
-func reverse(str string) string {
-	rev := []rune(str)
-	for i, val := range str {
-		rev[len(str)-i-1] = val
-	}
-	return string(rev)
-}
-
 func addToCache(c corner, tp tilePermutation, cache map[corner][]tilePermutation) {
 	if _, exists := cache[c]; !exists {
 		cache[c] = make([]tilePermutation, 0)
@@ -255,19 +274,90 @@ func addToCache(c corner, tp tilePermutation, cache map[corner][]tilePermutation
 	cache[c] = append(cache[c], tp)
 }
 
+var monster = [3]string{
+	"                  # ",
+	"#    ##    ##    ###",
+	" #  #  #  #  #  #   ",
+}
+
+func checkMonsterAt(c coord, sol *solution, tiles map[int]*tile, monsterCells map[coord]bool) bool {
+	cells := make([]coord, 0)
+	for rowDelta, monsterCol := range monster {
+		for colDelta, monsterVal := range monsterCol {
+			if monsterVal == '#' {
+				imgC := coord{c.row + rowDelta, c.col + colDelta}
+				imgVal, ok := sol.getValInImage(imgC, tiles)
+				if !ok || imgVal != "#" {
+					return false
+				}
+				cells = append(cells, imgC)
+			}
+		}
+	}
+	// Mark this monster since we found one
+	for _, cell := range cells {
+		monsterCells[cell] = true
+	}
+	return true
+}
+
+func (sol *solution) imageFullDim() int {
+	// Compensate for stripping the borders off the tiles
+	return sol.imageTileDim() * sol.dim
+}
+
+func (sol *solution) imageTileDim() int {
+	// Compensate for stripping the borders off the tiles
+	return tileDim - 2
+}
+
+func (sol *solution) getValInImage(c coord, tiles map[int]*tile) (string, bool) {
+	// Compensate for stripping the borders off the tiles
+	if c.row < 0 || c.col < 0 || c.row >= sol.imageFullDim() || c.col >= sol.imageFullDim() {
+		return "", false
+	}
+	outer := coord{c.row / sol.imageTileDim(), c.col / sol.imageTileDim()}
+	inner := coord{(c.row % sol.imageTileDim()) + 1, (c.col % sol.imageTileDim()) + 1}
+	// fmt.Println("converted", c, "to", outer, inner, "with tileDim", tileDim, sol.dim, sol.imageTileDim())
+	// check the dims
+	return sol.getVal(outer, inner, tiles), true
+}
+
+func findMonsters(sol *solution, tiles map[int]*tile) {
+	monsterCells := make(map[coord]bool, 0)
+	for r := 0; r < sol.imageFullDim(); r++ {
+		for c := 0; c < sol.imageFullDim(); c++ {
+			checkMonsterAt(coord{r, c}, sol, tiles, monsterCells)
+		}
+	}
+	if len(monsterCells) > 0 {
+		roughness := 0
+		for r := 0; r < sol.imageFullDim(); r++ {
+			for c := 0; c < sol.imageFullDim(); c++ {
+				_, isMonster := monsterCells[coord{r, c}]
+				if !isMonster {
+					imageVal, ok := sol.getValInImage(coord{r, c}, tiles)
+					if ok && imageVal == "#" {
+						roughness++
+					}
+				}
+			}
+		}
+		fmt.Println("ROUGHNESS is", roughness, sol.tileGrid[coord{0, 0}])
+	}
+}
+
 func solve(ch chan int, tiles map[int]*tile, starting tilePermutation, cache map[corner][]tilePermutation,
 	bottoms map[tilePermutation]string, rights map[tilePermutation]string) {
 	dim := int(math.Sqrt(float64(len(tiles))))
-	sol := &solution{make(map[coord]tilePermutation, 0), make(map[int]bool, 0), 1, dim}
+	sol := &solution{make(map[coord]tilePermutation, 0), make(map[int]bool, 0), dim}
 	sol.tileGrid[coord{0, 0}] = starting
 	sol.usedTiles[starting.tileID] = true
 	sol, ok := arrange(sol, coord{0, 1}, tiles, cache, bottoms, rights)
 	if ok {
-		fmt.Println("solution found", ok)
 		product := (sol.tileGrid[coord{0, 0}].tileID * sol.tileGrid[coord{0, sol.dim - 1}].tileID * sol.tileGrid[coord{sol.dim - 1, 0}].tileID *
 			sol.tileGrid[coord{sol.dim - 1, sol.dim - 1}].tileID)
-		fmt.Println("corner product is", product)
-		// fmt.Println(sol.tileGrid)
+		findMonsters(sol, tiles)
 		ch <- product
 	}
 }
@@ -288,6 +378,9 @@ func main() {
 			top := asString(grid, TOP)
 			left := asString(grid, LEFT)
 			tp := tilePermutation{t.id, permute}
+			cachedPermuted[tp] = &grid
+			// Add both this corner, as well as the top and left
+			// independently so we can place it in the left col or top row
 			addToCache(corner{top, left}, tp, cache)
 			addToCache(corner{top, ""}, tp, cache)
 			addToCache(corner{"", left}, tp, cache)
@@ -303,6 +396,15 @@ func main() {
 			go solve(ch, tiles, tilePermutation{t.id, permute}, cache, bottoms, rights)
 		}
 	}
-	product := <-ch
-	fmt.Println("received product: ", product)
+
+	// the solution grid has 16 permutations, so wait for all of them to come back
+	for i := 0; i < len(allPermutes); i++ {
+		product := <-ch
+		fmt.Println(i, "received product", product)
+	}
+	fmt.Println("tiles", len(tiles), "permutations", len(allPermutes), "cached permuted", len(cachedPermuted))
+
+	// solve the found solution directly
+	// solve(ch, tiles, tilePermutation{1951, permutation{3, true, true}}, cache, bottoms, rights)
+	// print(tiles[1951].applyCached(permutation{3, true, true}), tileDim, true)
 }
