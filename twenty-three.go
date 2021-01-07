@@ -50,11 +50,10 @@ func round1() {
 type node struct {
 	val  int
 	next *node
-	prev *node
 }
 
 func (n *node) append(val int) *node {
-	next := node{val, nil, n}
+	next := node{val, nil}
 	n.next = &next
 	return n.next
 }
@@ -67,18 +66,10 @@ func (n *node) forward(distance int) *node {
 	return result
 }
 
-func (n *node) backward(distance int) *node {
-	result := n
-	for i := 0; i < distance; i++ {
-		result = result.prev
-	}
-	return result
-}
-
 const maxInclusive = 1000000
 const numIterations = 10000000
 
-func findTargetNode(start *node, dest int, blocklist *node, valMap map[int]*node) *node {
+func findTargetNode(dest int, blocklist *node, valMap map[int]*node) *node {
 	if dest < 1 {
 		dest = maxInclusive
 	}
@@ -116,7 +107,7 @@ func (n *node) String() string {
 }
 
 func main() {
-	start := &node{1, nil, nil} // first digit here
+	start := &node{1, nil} // first digit here
 	// Track which nodes we have for which values for quick lookup
 	valMap := make(map[int]*node)
 	valMap[1] = start
@@ -133,25 +124,19 @@ func main() {
 	}
 	// make it a circle
 	end.next = start
-	start.prev = end
 
 	curr := start
 	for x := 0; x < numIterations; x++ {
 		pickup := curr.forward(1)
 		remaining := curr.forward(4)
-		remaining.prev = nil       // splice out pickup from remaining
 		curr.forward(3).next = nil // splice out pickup from remaining
-		pickup.prev = nil
-		curr.next = nil // splice out pickup from curr, don't add remaining yet
-		dest := findTargetNode(curr.prev, curr.val-1, pickup, valMap)
+		curr.next = nil            // splice out pickup from curr, don't add remaining yet
+		dest := findTargetNode(curr.val-1, pickup, valMap)
 		// splice in pickup
 		oldDestNext := dest.next
 		dest.next = pickup
-		pickup.prev = dest
 		pickup.forward(2).next = oldDestNext
-		oldDestNext.prev = pickup.forward(2)
 		curr.next = remaining
-		remaining.prev = curr
 
 		curr = curr.next
 		if x%100000 == 0 {
